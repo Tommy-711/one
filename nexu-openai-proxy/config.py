@@ -21,5 +21,11 @@ AVAILABLE_MODELS = [
     "gpt-5.4-mini",
     "kimi-k2.5",
     "mimo-v2-pro",
-    "minimax-m2.7"
+    "minimax-m2.7",
+    "web-chatgpt",
+    "web-claude",
+    "web-bard"
 ]
+
+# 网页AI配置
+WEB_AI_TIMEOUT = int(os.getenv("WEB_AI_TIMEOUT", "60"))

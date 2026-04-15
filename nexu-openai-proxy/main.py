@@ -14,8 +14,10 @@ import requests
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+
 from dotenv import load_dotenv
+
+from web_ai import get_web_ai_response, web_ai_client
 
 load_dotenv()
 
@@ -33,46 +35,30 @@ AVAILABLE_MODELS = [
     "gpt-5.4-mini",
     "kimi-k2.5",
     "mimo-v2-pro",
-    "minimax-m2.7"
+    "minimax-m2.7",
+    "web-chatgpt",
+    "web-claude",
+    "web-bard"
 ]
 
 server_process = None
 server_thread = None
 
 
-class ChatMessage(BaseModel):
-    role: str
-    content: Optional[Union[str, List[Dict[str, Any]]]] = None
-    tool_calls: Optional[List[Dict[str, Any]]] = None
-    tool_call_id: Optional[str] = None
-    name: Optional[str] = None
-
-class ChatCompletionRequest(BaseModel):
-    model: str
-    messages: List[ChatMessage]
-    temperature: Optional[float] = 1.0
-    top_p: Optional[float] = 1.0
-    n: Optional[int] = 1
-    stream: Optional[bool] = False
-    stop: Optional[Union[str, List[str]]] = None
-    max_tokens: Optional[int] = None
-    presence_penalty: Optional[float] = 0
-    frequency_penalty: Optional[float] = 0
-    logit_bias: Optional[Dict[str, float]] = None
-    user: Optional[str] = None
-    tools: Optional[List[Dict[str, Any]]] = None
-    tool_choice: Optional[Union[str, Dict[str, Any]]] = None
-    response_format: Optional[Dict[str, str]] = None
-
-class ModelInfo(BaseModel):
-    id: str
-    object: str = "model"
-    created: int = Field(default_factory=lambda: int(time.time()))
-    owned_by: str = "nexu"
-
-class ModelList(BaseModel):
-    object: str = "list"
-    data: List[ModelInfo]
+def convert_messages(messages):
+    result = []
+    for msg in messages:
+        item = {"role": msg.get("role")}
+        if "content" in msg:
+            item["content"] = msg.get("content")
+        if "tool_calls" in msg:
+            item["tool_calls"] = msg.get("tool_calls")
+        if "tool_call_id" in msg:
+            item["tool_call_id"] = msg.get("tool_call_id")
+        if "name" in msg:
+            item["name"] = msg.get("name")
+        result.append(item)
+    return result
 
 http_client: Optional[httpx.AsyncClient] = None
 
@@ -123,51 +109,85 @@ def convert_tools(tools: Optional[List[Dict[str, Any]]]) -> Optional[List[Dict[s
         return None
     return tools
 
-def build_request_body(req: ChatCompletionRequest) -> Dict[str, Any]:
+def build_request_body(req):
     body = {
-        "model": req.model,
-        "messages": convert_messages(req.messages),
-        "stream": req.stream,
+        "model": req.get("model"),
+        "messages": convert_messages(req.get("messages", [])),
+        "stream": req.get("stream", False),
     }
-    if req.temperature is not None:
-        body["temperature"] = req.temperature
-    if req.top_p is not None:
-        body["top_p"] = req.top_p
-    if req.max_tokens is not None:
-        body["max_tokens"] = req.max_tokens
-    if req.stop is not None:
-        body["stop"] = req.stop
-    if req.presence_penalty is not None:
-        body["presence_penalty"] = req.presence_penalty
-    if req.frequency_penalty is not None:
-        body["frequency_penalty"] = req.frequency_penalty
-    if req.response_format is not None:
-        body["response_format"] = req.response_format
-    if req.tools is not None:
-        body["tools"] = convert_tools(req.tools)
-    if req.tool_choice is not None:
-        body["tool_choice"] = req.tool_choice
+    if "temperature" in req:
+        body["temperature"] = req.get("temperature")
+    if "top_p" in req:
+        body["top_p"] = req.get("top_p")
+    if "max_tokens" in req:
+        body["max_tokens"] = req.get("max_tokens")
+    if "stop" in req:
+        body["stop"] = req.get("stop")
+    if "presence_penalty" in req:
+        body["presence_penalty"] = req.get("presence_penalty")
+    if "frequency_penalty" in req:
+        body["frequency_penalty"] = req.get("frequency_penalty")
+    if "response_format" in req:
+        body["response_format"] = req.get("response_format")
+    if "tools" in req:
+        body["tools"] = convert_tools(req.get("tools"))
+    if "tool_choice" in req:
+        body["tool_choice"] = req.get("tool_choice")
     return body
 
 @app.get("/v1/models")
 async def list_models():
-    models = [ModelInfo(id=m) for m in AVAILABLE_MODELS]
-    return ModelList(data=models)
+    models = [{
+        "id": m,
+        "object": "model",
+        "created": int(time.time()),
+        "owned_by": "nexu"
+    } for m in AVAILABLE_MODELS]
+    return {
+        "object": "list",
+        "data": models
+    }
 
 @app.get("/v1/models/{model_id}")
 async def get_model(model_id: str):
     if model_id not in AVAILABLE_MODELS:
         raise HTTPException(status_code=404, detail=f"Model {model_id} not found")
-    return ModelInfo(id=model_id)
+    return {
+        "id": model_id,
+        "object": "model",
+        "created": int(time.time()),
+        "owned_by": "nexu"
+    }
 
 @app.post("/v1/chat/completions")
-async def chat_completions(request: ChatCompletionRequest, raw_request: Request):
+async def chat_completions(raw_request: Request):
+    # 获取请求数据
+    request_data = await raw_request.json()
+    model = request_data.get("model")
+    stream = request_data.get("stream", False)
+    
+    # 检查是否为网页AI模型
+    if model and model.startswith("web-"):
+        if stream:
+            return StreamingResponse(
+                stream_web_ai_response(request_data),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no"
+                }
+            )
+        else:
+            return await non_stream_web_ai_response(request_data)
+    
+    # 原有逻辑：处理Nexu API模型
     if not http_client:
         raise HTTPException(status_code=500, detail="HTTP client not initialized")
 
-    body = build_request_body(request)
+    body = build_request_body(request_data)
 
-    if request.stream:
+    if stream:
         return StreamingResponse(
             stream_response(body),
             media_type="text/event-stream",
@@ -248,6 +268,50 @@ async def stream_response(body: Dict[str, Any]) -> AsyncGenerator[str, None]:
         }
         yield f"data: {json.dumps(error_chunk)}\n\n"
         yield "data: [DONE]\n\n"
+
+async def stream_web_ai_response(request):
+    """处理网页AI的流式响应"""
+    messages = convert_messages(request.get("messages", []))
+    model = request.get("model")
+    stream = request.get("stream", False)
+    async for chunk in get_web_ai_response(model, messages, stream):
+        if chunk == "[DONE]":
+            yield "data: [DONE]\n\n"
+        else:
+            yield f"data: {chunk}\n\n"
+
+async def non_stream_web_ai_response(request):
+    """处理网页AI的非流式响应"""
+    messages = convert_messages(request.get("messages", []))
+    model = request.get("model")
+    chunks = []
+    async for chunk in get_web_ai_response(model, messages, False):
+        if chunk != "[DONE]":
+            chunks.append(chunk)
+    
+    if chunks:
+        try:
+            # 合并所有chunk，取最后一个作为完整响应
+            last_chunk = json.loads(chunks[-1])
+            if "choices" in last_chunk:
+                # 构建完整响应
+                complete_response = {
+                    "id": last_chunk.get("id", f"chatcmpl-{uuid.uuid4().hex[:24]}"),
+                    "object": "chat.completion",
+                    "created": last_chunk.get("created", int(time.time())),
+                    "model": model,
+                    "choices": last_chunk["choices"],
+                    "usage": {
+                        "prompt_tokens": 0,  # 网页AI无法获取token计数
+                        "completion_tokens": 0,
+                        "total_tokens": 0
+                    }
+                }
+                return JSONResponse(content=complete_response)
+        except Exception as e:
+            return JSONResponse(content={"error": {"message": str(e), "type": "api_error"}}, status_code=500)
+    
+    return JSONResponse(content={"error": {"message": "No response from web AI", "type": "api_error"}}, status_code=500)
 
 @app.get("/health")
 async def health():

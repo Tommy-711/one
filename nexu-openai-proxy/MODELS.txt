@@ -1,0 +1,73 @@
+Nexu OpenAI Proxy - 模型配置说明
+=====================================
+
+一、Cline 配置方法
+------------------
+
+1. 打开 Cline 设置
+2. 找到 API Provider 设置
+3. 选择 "OpenAI Compatible"
+4. 填写以下信息：
+
+   Base URL:    http://127.0.0.1:8866/v1
+   API Key:     nexu-proxy (任意值即可)
+
+5. 保存设置
+
+
+二、可用模型及参数
+------------------
+
+模型名称                  上下文窗口    最大输出    Provider
+--------------------------------------------------------------
+deepseek-v3.2            200,000      8,192      OpenRouter
+gemini-3-flash-preview   200,000      8,192      OpenRouter
+gemini-3.1-flash-lite   200,000      8,192      OpenRouter
+glm-5                   200,000      8,192      OpenRouter
+glm-5-turbo             200,000      8,192      OpenRouter
+gpt-5.4-mini           200,000      8,192      OpenRouter
+kimi-k2.5              200,000      8,192      OpenRouter
+mimo-v2-pro            200,000      8,192      OpenRouter
+minimax-m2.7           200,000      8,192      OpenRouter
+
+
+三、Cline 中的模型配置建议
+-------------------------
+
+1. 在 Cline 的模型选择中手动输入模型名称
+
+2. 推荐配置（适用于 Cline Agent 模式）：
+
+   Model ID:          gpt-5.4-mini
+   Max Tokens:        8192
+   Context Tokens:    留空（自动）
+
+3. 如果遇到响应被截断，尝试降低 Max Tokens
+
+
+四、Function Calling 支持
+-------------------------
+
+所有模型都支持 Function Calling，可用于 Agent 工具调用。
+Cline 中的工具（如 Read、Edit、Write、Bash）会自动通过
+代理转发到 Nexu API 处理。
+
+
+五、注意事项
+-----------
+
+1. 确保代理服务器已启动（运行 python main.py）
+2. 首次使用建议先在菜单中选择 "1. Test Model Connection" 测试连接
+3. API Key 在 .env 文件中配置，默认使用你的 Nexu 账号
+4. 如需更换账号，修改 .env 中的 NEXU_API_KEY
+
+
+六、故障排除
+-----------
+
+- 连接超时：检查代理是否启动，端口是否被占用
+- 401 错误：检查 .env 中的 NEXU_API_KEY 是否正确
+- 模型不存在：确保模型名称拼写正确
+- 响应缓慢：可能是网络原因，Nexu API 需要翻墙
+
+=====================================
